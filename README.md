@@ -1,147 +1,137 @@
-# PacBio HIV/SIV Hypermutation and APOBEC Stop-Gain Analysis
+# PacBio HIV/SIV Hypermutation Pipeline
 
-A SLURM-oriented high-performance computing (HPC) workflow for analyzing PacBio HiFi amplicon reads from HIV, HIVΔvif, and SIV experiments. The pipeline demultiplexes and primer-trims reads, assigns barcode-defined samples to the appropriate viral reference, maps reads, quantifies APOBEC-relevant hypermutation, calls mutations in 1-nt, 2-nt, and 3-nt contexts, partitions reads by hypermutation status, and evaluates APOBEC-compatible stop-gain mutations in annotated coding sequences.
+A reproducible HPC workflow for PacBio HiFi amplicon sequencing data from HIV, HIVΔvif, and SIV experiments. The pipeline demultiplexes and primer-trims reads, assigns samples to viral references using barcode metadata, maps reads, quantifies APOBEC-associated hypermutation, calls mutations in multiple sequence contexts, classifies reads by hypermutation status, and performs CDS-aware stop-gain and frameshift analyses.
 
-> **Important:** This repository contains analysis scripts only. Raw PacBio data, viral reference FASTAs, barcode and primer FASTAs, metadata CSV files, and CDS BED annotations must be supplied separately. Update script paths and configuration blocks before use in a new project.
+> This repository provides analysis code, not experimental data. Supply the raw PacBio BAM, barcode and primer FASTAs, metadata CSV, matched HIV/SIV reference FASTAs, and CDS BED annotations before running the workflow.
 
-## Workflow overview
+## Pipeline
 
 ```text
-PacBio HiFi barcode BAM
+PacBio HiFi barcoded BAM
         |
         v
-1. Lima barcode demultiplexing
+Lima barcode demultiplexing
         |
         v
-2. Lima primer trimming
+Lima primer trimming
         |
         v
-3. Metadata-aware HIV/SIV assignment + BAM-to-FASTQ conversion
+Metadata validation and HIV/SIV reference assignment
         |
         v
-4. minimap2 mapping + primary-read BAM filtering
+BAM-to-FASTQ conversion and minimap2 mapping
         |
-        +--------------------------------+
-        |                                |
-        v                                v
-5. Hypermut3 RD/GD/AD analysis     6. 1-nt, 2-nt, and 3-nt mutation calling
-        |                                |
-        +---------------+----------------+
-                        |
-                        v
-7. Read-level hypermutation classification
-                        |
-                        v
-8. Hypermutated/nonhypermutated BAM subsets
-                        |
-                        v
-9. APOBEC-compatible stop-gain and frameshift-aware CDS analysis
-                        |
-                        v
-10. R-based exploratory statistics and publication-ready figures
+        v
+Primary-read BAM filtering
+        |
+        +-----------------------------+
+        |                             |
+        v                             v
+Hypermut3: RD, GD, AD          Mutation calling: 1-nt, 2-nt, 3-nt
+        |                             |
+        +--------------+--------------+
+                       |
+                       v
+Read-level hypermutation classification
+                       |
+                       v
+Hypermutated and nonhypermutated BAM subsets
+                       |
+                       v
+APOBEC-compatible stop-gain and frameshift analysis
+                       |
+                       v
+R-based quality control, statistics, and figures
 ```
 
-The supplied shell workflows are designed for Linux systems running SLURM. Python components can also be run locally after adapting paths and scheduler-specific commands. Pipeline wrappers are resumable: valid, nonempty completion outputs are generally reused rather than regenerated.
+The provided shell scripts target SLURM-managed Linux clusters. Python scripts may be run locally after adapting project paths, environment activation, and scheduler-specific commands. Most wrappers are resumable and avoid rerunning stages with valid nonempty outputs.
 
-## Repository contents
+## Contents
 
-| File | Role |
+| File | Purpose |
 |---|---|
-| `pacbio-lima-HIV-SIV.sh` | SLURM script for barcode demultiplexing of PacBio HiFi BAMs and primer trimming with Lima. |
-| `HIV-SIV-mapping-2.sh` | Parses Lima barcode pairs, validates metadata, routes reads to HIV or SIV references, converts BAM to FASTQ, maps with minimap2, and writes mapping QC. |
-| `BAM_HYPMUT3-3.py` | BAM-based implementation of Hypermut 3.0 for context-defined mutation detection and Fisher exact-test statistics. |
-| `hypermut3-all-4.sh` | SLURM wrapper that runs Hypermut3 in RD, GD, and AD contexts; merges output; and attaches metadata. |
-| `mutation_counting2-6.py` | Per-read single-nucleotide substitution counter, including selected `G>A` dinucleotide-derived classes. |
-| `dinucleotide_mutation_analysis-5.py` | Per-read 2-nt mutation-context analysis with directional and collapsed dinucleotide classes plus opportunity normalization. |
-| `trinucleotide_mutation_analysis-8.py` | Per-read 3-nt mutation-context analysis with raw and opportunity-normalized counts. |
-| `mutational-calling-all-contexts-7.sh` | Builds a metadata-aware manifest, launches SLURM arrays for 1-nt/2-nt/3-nt analyses, and combines outputs with metadata and Hypermut3 calls. |
-| `apobec_stopgain_pipeline-9.py` | CDS-aware analysis of G-to-A events, APOBEC-compatible stop gains, premature stops, indels, and frameshift-associated stops. |
-| `collapse_stopgain_master-10.py` | Collapses overlapping-CDS results to one row per `sample_name` and `read_id`. |
-| `stop-codon-hypermut-nonhypermut-11.sh` | Classifies reads using Hypermut3 RD p-values, filters BAMs by class, runs stop-gain analysis, and creates collapsed read-level outputs. |
-| `PacBio-HIV-SIV-2026-08-31-12.R` | R analysis script for threshold sensitivity, mutation-ratio QC, tables, scatterplots, and pooled SBS summaries. |
+| `pacbio-lima-HIV-SIV.sh` | Demultiplexes PacBio HiFi BAM input by barcode and trims primers using Lima. |
+| `HIV-SIV-mapping-2.sh` | Validates barcode metadata, assigns HIV/SIV references, converts BAM to FASTQ, maps reads with minimap2, and produces mapping QC. |
+| `BAM_HYPMUT3-3.py` | Hypermut3 implementation for BAM alignments, mutation-context counting, and Fisher exact testing. |
+| `hypermut3-all-4.sh` | Runs the Hypermut3 program in RD, GD, and AD contexts and builds merged metadata-aware output. |
+| `mutation_counting2-6.py` | Per-read single-base substitution counting. |
+| `dinucleotide_mutation_analysis-5.py` | Per-read dinucleotide-context mutation analysis, including directional and opportunity-normalized measures. |
+| `trinucleotide_mutation_analysis-8.py` | Per-read trinucleotide-context mutation analysis with raw and normalized measures. |
+| `mutational-calling-all-contexts-7.sh` | SLURM-array submitter for 1-nt, 2-nt, and 3-nt mutation calling and table combination. |
+| `apobec_stopgain_pipeline-9.py` | CDS-aware analysis of G-to-A events, APOBEC-compatible stop gains, premature stops, indels, and frameshifts. |
+| `collapse_stopgain_master-10.py` | Reduces overlapping-CDS output to one row per `sample_name` and `read_id`. |
+| `stop-codon-hypermut-nonhypermut-11.sh` | Partitions reads by Hypermut3 status, filters BAMs, runs stop-gain analysis, and produces class-specific master tables. |
+| `PacBio-HIV-SIV-2026-08-31-12.R` | Exploratory statistics, threshold sensitivity analyses, mutation-ratio QC, and publication-ready plots. |
 
-## Analysis design
+## Inputs
 
-### Viral-reference assignment
+### Metadata
 
-Sample identity is inferred from the barcode pair embedded in each Lima output filename. The metadata file must include the exact columns below:
+The metadata CSV must contain these exact headers:
 
 ```csv
 barcode,Virus
 ```
 
-Example barcode value:
+Example barcode:
 
 ```text
 bc1004_F2--bc1057_R2
 ```
 
-| Metadata value | Analysis group | Reference |
+| `Virus` value | Analysis group | Selected reference |
 |---|---|---|
-| `HIV` | HIV | HIV near-full-length reference FASTA |
-| `HIVDvif` | HIV | HIV near-full-length reference FASTA |
-| `SIV` | SIV | SIV near-full-length reference FASTA |
+| `HIV` | HIV | HIV near-full-length FASTA |
+| `HIVDvif` | HIV | HIV near-full-length FASTA |
+| `SIV` | SIV | SIV near-full-length FASTA |
 
-Metadata is authoritative. The scripts check for missing barcodes, unsupported virus labels, ambiguous assignments, UTF-8 BOMs, Windows line endings, and missing required metadata columns. Diagnostic files are produced for unmatched and ambiguous barcode assignments.
+Additional metadata columns are retained and merged into downstream result tables. Barcode assignment is treated as authoritative; scripts flag missing barcodes, unsupported virus labels, ambiguous entries, malformed metadata headers, UTF-8 byte-order marks, and Windows line-ending artifacts.
 
-### Hypermut3 contexts
+### Required files
 
-The Hypermut3 wrapper evaluates every mapped sample in three contexts:
+| Input | Used by | Notes |
+|---|---|---|
+| PacBio HiFi BAM | Lima preprocessing | BAM input is expected rather than raw FASTQ. |
+| Barcode FASTA | Lima preprocessing | Must match the barcode design used for the library. |
+| Primer FASTA | Lima preprocessing | Used in post-demultiplex primer trimming. |
+| Metadata CSV | Mapping and downstream analyses | Requires exact `barcode` and `Virus` columns. |
+| HIV FASTA | HIV/HIVΔvif mapping and stop-gain analysis | Must match the HIV CDS BED annotation. |
+| SIV FASTA | SIV mapping and stop-gain analysis | Must match the SIV CDS BED annotation. |
+| HIV CDS BED | Stop-gain analysis | Must contain validated CDS positions, strand, and frame. |
+| SIV CDS BED | Stop-gain analysis | Must contain validated CDS positions, strand, and frame. |
 
-| Context | Intended use |
-|---|---|
-| `RD` | Broad context used for primary Fisher-test hypermutation classification. |
-| `GD` | GG-associated G-to-A context analysis. |
-| `AD` | GA-associated G-to-A context analysis. |
+The CDS BED annotations should be validated against their exact plasmid-derived reference sequences. In the source workflow, HIV features were transferred from `KJ925006.1` and SIV features from `M33262.1`, then checked using protein similarity searches and six-frame translation inspection in Geneious Prime.
 
-The exact context definitions are configured in `hypermut3-all-4.sh`; retain those settings when reproducing an analysis because they determine biological interpretation.
+### File naming
 
-For downstream stop-codon analysis, reads are classified as:
+Downstream wrappers expect filenames that preserve barcode identity:
 
-- **Hypermutated:** `fisher_p_RD < 0.05`
-- **Nonhypermutated:** `fisher_p_RD >= 0.05`
-- **Unclassified:** `fisher_p_RD` is missing, invalid, or nonnumeric; these reads are reported in QC output but excluded from either subset.
+```text
+Demultiplexed BAM:  DNA_NFL.demux.<barcode>.bam
+Trimmed BAM:        DNA_NFL.demux.<barcode>.trimmed.bam
+Mapped BAM:         DNA_NFL.demux.<barcode>.aligned.bam
+```
 
-### Mutation calling
+Example:
 
-Primary mapped reads are analyzed independently in three modes:
+```text
+DNA_NFL.demux.bc1004_F2--bc1057_R2.trimmed.bam
+DNA_NFL.demux.bc1004_F2--bc1057_R2.aligned.bam
+```
 
-- **1-nt:** Raw per-read counts for all 12 possible nonidentity single-base substitutions.
-- **2-nt:** `minus1_plus1` and `zero_plus2` windows, full-context substitutions, directional classes, collapsed dinucleotide classes, and opportunity-normalized values.
-- **3-nt:** Trinucleotide windows centered on single-base differences, with raw and opportunity-normalized values.
+Barcode components may include numeric suffixes such as `F2` and `R2`. These distinguish reused barcode pairs that correspond to different biological samples across sequencing runs or modules.
 
-Duplicate and unmapped reads are excluded by the Python mutation scripts. Gapped or incomplete motif windows are not counted. For normalized measures, the denominator is the number of valid ungapped reference windows available in the read for the relevant window definition.
+## Installation
 
-### Stop-gain analysis
+### Requirements
 
-After Hypermut3 classification, the stop-gain workflow:
-
-1. Creates per-sample read-name lists using `sample_name` plus `read_id` as the logical key.
-2. Filters aligned BAMs with `samtools view -N` into hypermutated and nonhypermutated subsets.
-3. Selects matched HIV or SIV reference FASTAs and CDS BED annotations.
-4. Handles plus- and minus-strand CDS features while respecting coding frame.
-5. Identifies observed coding-sequence-oriented G-to-A events.
-6. Identifies APOBEC-compatible stop-gain opportunities: G at codon positions 1 or 2 in a `GG` or `GA` motif where G-to-A yields `TAA`, `TAG`, or `TGA`.
-7. Records all premature stops, indels, frameshift indels, and frameshift-associated premature stops.
-8. Generates gene-level read tables and collapsed tables for non-overlapping read-level summaries.
-
-HIV and SIV contain overlapping coding frames. A gene-level output may therefore contain multiple rows per read. Use the collapsed output for one-row-per-read analyses, and retain the gene-level output for feature- or frame-specific questions.
-
-## Requirements
-
-### Platform
-
-- Linux or Linux-compatible HPC environment
+- Linux or a Linux-compatible HPC environment
 - Bash 4+
-- SLURM for the supplied `.sh` wrappers (`sbatch`, arrays, and job dependencies)
+- SLURM for the supplied submission wrappers
 - Conda, Miniconda, or Mambaforge
-- Storage for BAM/FASTQ files, sorted BAMs, indices, CSV/TSV intermediates, and logs
+- Sufficient storage for BAMs, FASTQs, BAM indices, intermediate tables, and logs
 
-The distributed SLURM settings span approximately 16 GB to 800 GB RAM and 1 to 192 CPU cores depending on the stage. These are cluster-specific starting points, not universal requirements. Benchmark representative samples and adjust `#SBATCH` resources, array concurrency, and `--threads` appropriately.
-
-### Command-line tools
-
-Ensure the following programs are available in `PATH` as appropriate for the stage being run:
+Core executables:
 
 ```text
 lima
@@ -151,35 +141,57 @@ minimap2
 samtools
 python3
 Rscript
-awk
-sed
-tr
-grep
-find
-sort
-wc
-head
-basename
-dirname
-gzip
 sbatch
 ```
 
-`pbindex` is optional in the mapping script; the workflow warns if it is unavailable. Standard Unix utilities are typically already available on HPC systems.
+The shell workflow also uses standard Unix programs including `awk`, `sed`, `tr`, `grep`, `find`, `sort`, `wc`, `head`, `basename`, `dirname`, and `gzip`. `pbindex` is optional in the mapping workflow.
 
-### Python packages
+### Conda environments
+
+Separate environments are recommended to avoid conflicts between PacBio utilities and scientific Python dependencies.
+
+```bash
+conda config --add channels conda-forge
+conda config --add channels bioconda
+conda config --set channel_priority strict
+```
+
+Create the preprocessing/mapping environment:
+
+```bash
+conda create -y -n pacbio-isoseq \
+  -c conda-forge -c bioconda \
+  python=3.11 lima pbtk minimap2 samtools pysam pandas numpy
+```
+
+Create the Hypermut3 and mutation-analysis environment:
+
+```bash
+conda create -y -n hypermut3 \
+  -c conda-forge -c bioconda \
+  python=3.11 samtools pysam pandas scipy numpy
+```
+
+Create the R environment:
+
+```bash
+conda create -y -n pacbio-r \
+  -c conda-forge -c bioconda \
+  r-base=4.3 r-readr r-dplyr r-ggplot2 r-scales r-svglite \
+  r-tidyr r-viridis r-patchwork
+```
+
+Required Python packages:
 
 ```text
 python >=3.10,<3.13
+numpy
 pandas
 pysam
 scipy
-numpy
 ```
 
-`BAM_HYPMUT3-3.py` uses `pysam` and `scipy.stats.fisher_exact`. Mutation-calling and stop-gain scripts use `pandas` and `pysam`.
-
-### R packages
+Required R packages:
 
 ```text
 readr
@@ -192,81 +204,24 @@ viridis
 patchwork
 ```
 
-`tidyr` is required even where its functions are called by explicit namespace, including `tidyr::crossing()` and `pivot_wider()`.
+### SLURM Conda initialization
 
-## Environment setup
-
-Use separate Conda environments to reduce dependency conflicts:
-
-- `pacbio-isoseq`: Lima, PacBio BAM utilities, minimap2, samtools, and preprocessing dependencies.
-- `hypermut3`: Python analysis packages and samtools.
-- `pacbio-r`: R and plotting packages.
-
-Configure strict channel priority:
+Batch shells do not always load Conda automatically. Source `conda.sh` before activation:
 
 ```bash
-conda config --add channels conda-forge
-conda config --add channels bioconda
-conda config --set channel_priority strict
-```
-
-Create the PacBio/mapping environment:
-
-```bash
-conda create -y -n pacbio-isoseq \
-  -c conda-forge -c bioconda \
-  python=3.11 \
-  lima \
-  pbtk \
-  minimap2 \
-  samtools \
-  pysam \
-  pandas \
-  numpy
-```
-
-Create the Hypermut3/analysis environment:
-
-```bash
-conda create -y -n hypermut3 \
-  -c conda-forge -c bioconda \
-  python=3.11 \
-  samtools \
-  pysam \
-  pandas \
-  scipy \
-  numpy
-```
-
-Create the R environment:
-
-```bash
-conda create -y -n pacbio-r \
-  -c conda-forge -c bioconda \
-  r-base=4.3 \
-  r-readr \
-  r-dplyr \
-  r-ggplot2 \
-  r-scales \
-  r-svglite \
-  r-tidyr \
-  r-viridis \
-  r-patchwork
-```
-
-Activate an environment as needed:
-
-```bash
-conda activate pacbio-isoseq
-# or
+source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate hypermut3
-# or
-conda activate pacbio-r
 ```
 
-`pbtk` typically provides `bam2fastq` and may provide `pbindex`, but executable availability can vary by platform and package build. Confirm binary availability after installation.
+On module-based clusters, load the site-specific Conda module first:
 
-### Validate installations
+```bash
+module load miniconda
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate hypermut3
+```
+
+### Validate software
 
 ```bash
 conda activate pacbio-isoseq
@@ -280,146 +235,33 @@ command -v pbindex && pbindex --help | head || true
 
 ```bash
 conda activate hypermut3
-python --version
 python - <<'PY'
 import numpy
 import pandas
 import pysam
 import scipy
 from scipy.stats import fisher_exact
-print("numpy:", numpy.__version__)
-print("pandas:", pandas.__version__)
-print("pysam:", pysam.__version__)
-print("scipy:", scipy.__version__)
-print("Fisher exact test import: OK")
+print("Scientific Python environment: OK")
 PY
-samtools --version
 ```
 
-```bash
-conda activate pacbio-r
-Rscript -e 'pkgs <- c("readr","dplyr","ggplot2","scales","svglite","tidyr","viridis","patchwork"); stopifnot(all(sapply(pkgs, requireNamespace, quietly=TRUE))); sessionInfo()'
-```
+## Configuration
 
-### Conda in SLURM jobs
-
-Noninteractive SLURM shells often do not initialize Conda automatically. Add the following before `conda activate` in each batch script, substituting site-specific module commands when needed:
-
-```bash
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate hypermut3
-```
-
-For clusters that expose Conda through environment modules:
-
-```bash
-module load miniconda
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate hypermut3
-```
-
-## Inputs and layout
-
-A recommended directory structure is shown below. It is not mandatory, but every path in every configuration block must be changed consistently if another layout is used.
-
-```text
-HIV-SIV-Hypermutation-Assay-PacBio/
-├── RAW-DATA/
-│   └── <run-date>/
-│       └── <PacBio_HiFi_barcode_BAM>.bam
-├── reference-genomes/
-│   ├── pJH048_i3_HIV-NFL.fasta
-│   ├── SIV239-SpX_i22-NFL.fasta
-│   ├── pJH048_i3_-CR_extraction-HIV-NFL-CDS.bed
-│   └── RSR_Exp103_SIV239-SpX_i22_extraction-NFL-CDS.bed
-├── analysis-<run-date>/
-│   ├── primers-barcodes/
-│   │   ├── <barcodes>.fasta
-│   │   └── <primers>.fasta
-│   ├── metadata/
-│   │   └── <metadata>.csv
-│   ├── lima/
-│   ├── HIV/mapped/
-│   ├── SIV/mapped/
-│   ├── hypermut3/
-│   ├── mutational-calling/
-│   └── stop-codon/
-├── scripts/
-│   ├── pacbio-lima-HIV-SIV.sh
-│   ├── HIV-SIV-mapping-2.sh
-│   ├── hypermut3-all-4.sh
-│   ├── mutational-calling-all-contexts-7.sh
-│   ├── stop-codon-hypermut-nonhypermut-11.sh
-│   └── *.py
-└── README.md
-```
-
-### Required biological inputs
-
-| Input | Required by | Notes |
-|---|---|---|
-| PacBio HiFi BAM | Lima preprocessing | The scripts expect BAM input rather than raw FASTQ. |
-| Barcode FASTA | Lima preprocessing | Must match the library barcode design. |
-| Primer FASTA | Lima preprocessing | Use unique primer sequences for post-demultiplex primer trimming. |
-| Metadata CSV | Mapping and downstream workflows | Requires exact `barcode` and `Virus` headers; extra metadata columns are retained in final outputs. |
-| HIV FASTA | HIV and HIVΔvif samples | Must match the reference used by minimap2 and the paired HIV CDS BED. |
-| SIV FASTA | SIV samples | Must match the reference used by minimap2 and the paired SIV CDS BED. |
-| HIV CDS BED | Stop-gain workflow | Requires validated CDS coordinates, strand, and reading frame. |
-| SIV CDS BED | Stop-gain workflow | Requires validated CDS coordinates, strand, and reading frame. |
-
-For the original annotations, HIV CDS features were transferred from GenBank accession `KJ925006.1` to the plasmid-derived HIV reference after pairwise alignment, and SIV features were transferred from `M33262.1` to the SIV plasmid reference. Predicted proteins and all six reading frames were inspected in Geneious Prime to validate feature identity and translation frame before generating the BED annotations used by the stop-gain workflow.
-
-### Naming conventions
-
-The shell workflows rely on consistent filename lineage:
-
-```text
-Lima-demultiplexed BAM:  DNA_NFL.demux.<barcode>.bam
-Primer-trimmed BAM:      DNA_NFL.demux.<barcode>.trimmed.bam
-Mapped BAM:              DNA_NFL.demux.<barcode>.aligned.bam
-```
-
-Example:
-
-```text
-DNA_NFL.demux.bc1004_F2--bc1057_R2.trimmed.bam
-DNA_NFL.demux.bc1004_F2--bc1057_R2.aligned.bam
-```
-
-Barcode identifiers can include optional numeric suffixes after `F` and `R`, such as `F2` and `R2`. These suffixes distinguish reused barcode pairs across runs or modules that correspond to different biological samples. The stop-gain script also supports the older no-suffix style.
-
-## Before running
-
-### 1. Make paths portable
-
-Update the configuration blocks near the beginning of every shell script. At minimum, change:
+Update the configuration blocks at the beginning of each shell wrapper before submission. At minimum, set:
 
 ```bash
 PROJECT_DIR="/path/to/HIV-SIV-Hypermutation-Assay-PacBio"
 ANALYSIS_DIR="${PROJECT_DIR}/analysis-<run-date>"
 ```
 
-Also update paths to raw BAM input, barcode and primer FASTAs, metadata CSV, HIV/SIV reference FASTAs, HIV/SIV CDS BED files, Python scripts, SLURM log/work directories, and Conda initialization.
+Also configure paths to raw data, barcode and primer FASTAs, metadata, both reference FASTAs, CDS BED annotations, Python scripts, SLURM logs, and your Conda installation.
 
-Use a distinct `ANALYSIS_DIR` for each independent run to avoid mixing outputs from different runs.
+Use a separate dated `ANALYSIS_DIR` for each independent run.
 
-### 2. Resolve wrapper script names
-
-The wrappers may expect generic script names while the supplied files use versioned names. Either point wrapper variables directly at the versioned files or create stable copies/symlinks.
+Some wrappers refer to stable, unversioned Python script names. Either update the wrapper variables to use versioned filenames directly or create symlinks:
 
 ```bash
 mkdir -p "${PROJECT_DIR}/scripts"
-cp BAM_HYPMUT3-3.py "${PROJECT_DIR}/scripts/BAM_HYPMUT3.py"
-cp mutation_counting2-6.py "${PROJECT_DIR}/scripts/mutation_counting2.py"
-cp dinucleotide_mutation_analysis-5.py "${PROJECT_DIR}/scripts/dinucleotide_mutation_analysis.py"
-cp trinucleotide_mutation_analysis-8.py "${PROJECT_DIR}/scripts/trinucleotide_mutation_analysis.py"
-cp apobec_stopgain_pipeline-9.py "${PROJECT_DIR}/scripts/apobec_stopgain_pipeline.py"
-cp collapse_stopgain_master-10.py "${PROJECT_DIR}/scripts/collapse_stopgain_master.py"
-```
-
-Alternatively, use symlinks to preserve source provenance:
-
-```bash
 ln -sfn "$(pwd)/BAM_HYPMUT3-3.py" "${PROJECT_DIR}/scripts/BAM_HYPMUT3.py"
 ln -sfn "$(pwd)/mutation_counting2-6.py" "${PROJECT_DIR}/scripts/mutation_counting2.py"
 ln -sfn "$(pwd)/dinucleotide_mutation_analysis-5.py" "${PROJECT_DIR}/scripts/dinucleotide_mutation_analysis.py"
@@ -428,16 +270,7 @@ ln -sfn "$(pwd)/apobec_stopgain_pipeline-9.py" "${PROJECT_DIR}/scripts/apobec_st
 ln -sfn "$(pwd)/collapse_stopgain_master-10.py" "${PROJECT_DIR}/scripts/collapse_stopgain_master.py"
 ```
 
-Then set variables such as:
-
-```bash
-PYTHON_SCRIPT_DIR="${PROJECT_DIR}/scripts"
-HYPMUT3_SCRIPT="${PYTHON_SCRIPT_DIR}/BAM_HYPMUT3.py"
-```
-
-### 3. Index reference FASTAs
-
-`pysam.FastaFile` requires `.fai` indices for stop-gain analysis:
+Create FASTA indices required by `pysam.FastaFile` before stop-gain analysis:
 
 ```bash
 conda activate hypermut3
@@ -445,35 +278,7 @@ samtools faidx reference-genomes/pJH048_i3_HIV-NFL.fasta
 samtools faidx reference-genomes/SIV239-SpX_i22-NFL.fasta
 ```
 
-Mapping creates sorted and indexed BAMs. Do not rename BAM files after downstream manifests have been generated.
-
-### 4. Validate metadata
-
-```bash
-python - <<'PY'
-import pandas as pd
-
-metadata = pd.read_csv(
-    "analysis-<run-date>/metadata/<metadata>.csv",
-    dtype=str,
-    encoding="utf-8-sig",
-)
-metadata.columns = metadata.columns.str.strip()
-required = {"barcode", "Virus"}
-missing = required - set(metadata.columns)
-if missing:
-    raise SystemExit(f"Missing required metadata columns: {sorted(missing)}")
-metadata["barcode"] = metadata["barcode"].astype(str).str.strip()
-metadata["Virus"] = metadata["Virus"].astype(str).str.strip()
-print(metadata[["barcode", "Virus"]].head())
-print("Rows:", len(metadata))
-print("Unique barcodes:", metadata["barcode"].nunique())
-print("Duplicate barcode rows:", metadata["barcode"].duplicated(keep=False).sum())
-print("Virus labels:", sorted(metadata["Virus"].dropna().unique()))
-PY
-```
-
-## Running the pipeline
+## Usage
 
 ### 1. Demultiplex and trim
 
@@ -482,163 +287,129 @@ conda activate pacbio-isoseq
 sbatch scripts/pacbio-lima-HIV-SIV.sh
 ```
 
-This job uses Lima with `--hifi-preset ASYMMETRIC` and `--split-named` for barcode demultiplexing, discovers barcode-split BAMs, performs a second Lima pass for primer trimming, and writes trimmed BAMs under `analysis-<run-date>/lima/trimmed/`.
+This stage uses Lima to split reads by barcode and trim primers. Trimmed BAMs are written under:
 
-Inspect SLURM `.out` and `.err` logs before continuing. The script uses `set -euo pipefail`, so an unhandled error should stop the job.
+```text
+analysis-<run-date>/lima/trimmed/
+```
 
-### 2. Route, convert, map, and QC
+### 2. Map reads
 
 ```bash
 conda activate pacbio-isoseq
 sbatch scripts/HIV-SIV-mapping-2.sh
 ```
 
-For each trimmed BAM, this workflow extracts and validates the barcode pair, selects the HIV or SIV reference from metadata, converts PacBio BAM to compressed FASTQ, maps reads with minimap2, retains primary mapped reads with `samtools view -F 2308`, and writes mapping summaries.
+For each primer-trimmed BAM, this workflow extracts the barcode from the filename, validates it against metadata, selects the appropriate viral reference, converts BAM to compressed FASTQ, maps HiFi reads with minimap2, and retains primary mapped reads using:
 
-> Do not calculate mapping efficiency from `samtools flagstat` on final filtered BAMs alone. Unmapped reads have already been removed, so the resulting mapped percentage will be artificially close to 100%.
+```bash
+samtools view -F 2308
+```
+
+Mapped BAMs are routed to `HIV/mapped/` or `SIV/mapped/`.
+
+> Compute mapping efficiency from pre-filter FASTQ read counts and retained mapped-read counts. Do not infer mapping efficiency from a filtered mapped BAM alone, because unmapped reads have already been removed.
 
 ### 3. Run Hypermut3
-
-Set `HYPMUT3_SCRIPT` to the location of `BAM_HYPMUT3-3.py` or its stable symlink/copy, then run:
 
 ```bash
 conda activate hypermut3
 sbatch scripts/hypermut3-all-4.sh
 ```
 
-Expected output structure:
+Hypermut3 analyzes each mapped BAM in three contexts:
+
+| Context | Interpretation |
+|---|---|
+| `RD` | Broad G-to-A context used for the primary Fisher-test classification. |
+| `GD` | GG-associated G-to-A mutation context. |
+| `AD` | GA-associated G-to-A mutation context. |
+
+Key output:
 
 ```text
-analysis-<run-date>/hypermut3/
-├── RD/
-├── GD/
-├── AD/
-├── combined/
-│   ├── master_hypermut3_all_contexts_long.csv
-│   ├── master_hypermut3_RD_GD_AD_metadata.csv
-│   └── hypermut3_run_summary.tsv
-├── logs/
-└── manifests/
+analysis-<run-date>/hypermut3/combined/master_hypermut3_RD_GD_AD_metadata.csv
 ```
 
-The wide master table, `master_hypermut3_RD_GD_AD_metadata.csv`, is the primary input for downstream mutation-call joins, stop-codon classification, and R analysis.
+Read classification for downstream stop-gain analysis is based on `fisher_p_RD`:
 
-### 4. Call 1-nt, 2-nt, and 3-nt mutations
+- **Hypermutated:** `fisher_p_RD < 0.05`
+- **Nonhypermutated:** `fisher_p_RD >= 0.05`
+- **Unclassified:** missing, invalid, or nonnumeric p-value; reported in QC and excluded from both classes
+
+### 4. Call mutation contexts
 
 ```bash
 conda activate hypermut3
 sbatch scripts/mutational-calling-all-contexts-7.sh
 ```
 
-The submitter job creates a metadata-validated manifest, dynamically writes worker and concatenation scripts, launches separate SLURM arrays for each context size, and schedules a combiner after successful completion.
+The submitter creates a metadata-validated BAM manifest, launches SLURM arrays for each context size, and combines results after successful completion.
 
-```text
-analysis-<run-date>/mutational-calling/
-├── 1nt/
-├── 2nt/
-├── 3nt/
-├── combined/
-├── logs/
-└── manifests/
-```
+- **1-nt:** Raw counts of all 12 nonidentity single-base substitutions per read
+- **2-nt:** Full dinucleotide context substitutions, directional mutation classes, collapsed classes, and opportunity-normalized values
+- **3-nt:** Trinucleotide context counts and opportunity-normalized measures
 
-The workflow is resumable at the sample/context level and skips work with an existing nonempty completion sentinel.
+Duplicate and unmapped reads are excluded. Incomplete or gapped motif windows are not counted. Normalization denominators correspond to valid, ungapped reference windows available per read.
 
-### 5. Classify reads and analyze stop gains
+### 5. Analyze stop gains
 
 ```bash
 conda activate hypermut3
 sbatch scripts/stop-codon-hypermut-nonhypermut-11.sh
 ```
 
-This workflow uses `fisher_p_RD` to create per-sample hypermutated and nonhypermutated read lists, filters source BAMs, runs CDS-aware stop-gain analysis, and collapses overlapping-CDS results.
+This stage creates class-specific read lists, filters BAMs with `samtools view -N`, applies the relevant HIV or SIV FASTA and CDS BED annotation, and reports coding-sequence mutation consequences.
 
-```text
-analysis-<run-date>/stop-codon/
-├── hypermutated/
-│   ├── filtered-bams/
-│   ├── read-lists/
-│   └── stopgain/
-│       ├── stopgain_sequence_level_master.tsv
-│       └── stopgain_sequence_level_master.collapsed_by_read.tsv
-├── nonhypermutated/
-│   ├── filtered-bams/
-│   ├── read-lists/
-│   └── stopgain/
-│       ├── stopgain_sequence_level_master.tsv
-│       └── stopgain_sequence_level_master.collapsed_by_read.tsv
-├── logs/
-└── manifests/
-```
+The analysis identifies:
 
-### 6. Run R analysis
+- Observed CDS-oriented G-to-A events
+- APOBEC-compatible G-to-A stop gains
+- All premature stop codons
+- CDS-overlapping indels
+- Frameshift indels
+- Frameshift-associated premature stops
 
-Update `setwd()` and input-file definitions in `PacBio-HIV-SIV-2026-08-31-12.R`, or copy/link combined CSV files to the expected locations.
+A potential APOBEC-compatible stop gain is defined as a G at codon position 1 or 2 in a `GG` or `GA` motif where G-to-A produces `TAA`, `TAG`, or `TGA`.
+
+### 6. Generate statistics and figures
 
 ```bash
 conda activate pacbio-r
 Rscript scripts/PacBio-HIV-SIV-2026-08-31-12.R
 ```
 
-The R workflow includes:
+Update the R script's working directory and input locations as needed. The analysis includes RD p-value threshold sensitivity, donor-level hypermutation summaries, RD/GD/AD ratio QC, GD-versus-AD scatterplots, and pooled SBS distributions for HIV versus HIVΔvif reads.
 
-- RD p-value threshold sensitivity from 0.01 to 0.10
-- Hypermutated-read counts and percentages by donor and donor/virus
-- RD, GD, and AD mutation-ratio QC
-- Filtering to donors `N03`, `N04`, `N06`, and `N10`, `DPI <= 7`, RD-significant reads, and valid GD/AD denominators
-- Combined and stratified GD-versus-AD scatterplots in PNG and SVG formats
-- Pooled raw SBS distributions for HIV versus HIVΔvif DNA reads
+## Outputs
 
-## Key outputs
-
-### Mapping
-
-| Output | Description |
+| Location or file | Description |
 |---|---|
-| `HIV/*.fastq.gz`, `SIV/*.fastq.gz` | BAM-derived read sequences routed by metadata-defined viral group. |
-| `HIV/mapped/*.aligned.bam`, `SIV/mapped/*.aligned.bam` | Primary mapped reads after minimap2 alignment and SAM-flag filtering. |
-| `mapping_summary.<jobid>.tsv` | Per-sample pre-filter FASTQ reads, retained primary mapped reads, and mapping percentage. |
-| `unmatched_barcodes.<jobid>.tsv` | Inputs skipped because filename, barcode, or metadata matching failed. |
-| `ambiguous_barcodes.<jobid>.tsv` | Barcodes assigned to multiple viral categories in metadata. |
-
-### Hypermut3
-
-| Output | Description |
-|---|---|
-| `RD/`, `GD/`, `AD/` | Per-context, per-sample Hypermut3 results. |
-| `master_hypermut3_all_contexts_long.csv` | Long-format result table across contexts. |
-| `master_hypermut3_RD_GD_AD_metadata.csv` | Wide per-read master table with context metrics and metadata. |
-| `hypermut3_run_summary.tsv` | Processing status and run summaries. |
-
-### Mutation calling
-
-| Output | Description |
-|---|---|
-| `1nt/*_mutation_counts.csv` | Per-read raw nonidentity single-base-substitution counts. |
-| `2nt/*_mutation_counts.csv` | Raw full-context dinucleotide mutation counts. |
-| `2nt/*_normalized_mutation_counts.csv` | Opportunity-normalized dinucleotide counts. |
-| `2nt/*_dinucleotide_mutation_class_counts.csv` | Directional mutation-class counts. |
-| `2nt/*_collapsed_dinucleotide_mutation_class_counts.csv` | Context-collapsed dinucleotide classes. |
+| `HIV/*.fastq.gz`, `SIV/*.fastq.gz` | BAM-derived reads routed by metadata-defined virus group. |
+| `HIV/mapped/*.aligned.bam`, `SIV/mapped/*.aligned.bam` | Primary mapped reads after alignment and filtering. |
+| `mapping_summary.<jobid>.tsv` | Per-sample read counts and mapping percentages. |
+| `unmatched_barcodes.<jobid>.tsv` | Inputs skipped due to barcode/metadata matching failures. |
+| `ambiguous_barcodes.<jobid>.tsv` | Metadata barcodes with multiple viral assignments. |
+| `hypermut3/combined/master_hypermut3_all_contexts_long.csv` | Long-format Hypermut3 results. |
+| `hypermut3/combined/master_hypermut3_RD_GD_AD_metadata.csv` | Wide per-read Hypermut3 table with metadata. |
+| `1nt/*_mutation_counts.csv` | Per-read single-base substitution counts. |
+| `2nt/*_mutation_counts.csv` | Raw dinucleotide-context counts. |
+| `2nt/*_normalized_mutation_counts.csv` | Opportunity-normalized dinucleotide values. |
 | `3nt/*_mutation_counts.csv` | Raw trinucleotide-context counts. |
-| `3nt/*_normalized_mutation_counts.csv` | Opportunity-normalized trinucleotide counts. |
-| `combined/` | Merged mutation tables with metadata and Hypermut3 RD p-values. |
+| `3nt/*_normalized_mutation_counts.csv` | Opportunity-normalized trinucleotide values. |
+| `*.read_summary.tsv` | Per-read/per-CDS stop-gain and indel summary. |
+| `*.g2a_events.tsv` | Observed CDS-oriented G-to-A events. |
+| `*.stop_gain_events.tsv` | APOBEC-compatible stop-gain events. |
+| `*.indel_events.tsv` | CDS-overlapping indels and frame status. |
+| `*.frameshift_stop_events.tsv` | Premature stops observed in frameshifted reads. |
+| `stopgain_sequence_level_master.tsv` | Class-specific, gene-level master result table. |
+| `stopgain_sequence_level_master.collapsed_by_read.tsv` | One row per `sample_name`/`read_id` for read-level summaries. |
 
-### Stop-gain analysis
-
-| Output | Description |
-|---|---|
-| `*.read_summary.tsv` | Per-read, per-CDS summary of G-to-A counts, stop gains, indels, and frameshift status. |
-| `*.g2a_events.tsv` | All observed CDS-oriented G-to-A events. |
-| `*.stop_gain_events.tsv` | APOBEC-compatible G-to-A stop-gain events. |
-| `*.indel_events.tsv` | CDS-overlapping insertions/deletions with frameshift flags. |
-| `*.frameshift_stop_events.tsv` | Premature stops in reads carrying frameshift indels. |
-| `*.sequence_stopgain_master.tsv` | Per-sample/per-read/per-gene master table. |
-| `stopgain_sequence_level_master.tsv` | Concatenated sequence-level master table for each Hypermut3 class. |
-| `stopgain_sequence_level_master.collapsed_by_read.tsv` | One row per `sample_name` and `read_id`, suitable for read-level summaries. |
+Because HIV and SIV have overlapping coding regions, gene-level stop-gain outputs may have more than one row per read. Use the collapsed table for analyses requiring independent read-level observations.
 
 ## Quality control
 
-### Preprocessing and mapping
+Check that expected outputs exist and BAMs are valid:
 
 ```bash
 find analysis-<run-date>/lima/trimmed -name '*.trimmed.bam' | wc -l
@@ -651,13 +422,9 @@ for bam in analysis-<run-date>/HIV/mapped/*.aligned.bam analysis-<run-date>/SIV/
 done
 ```
 
-Review unmatched and ambiguous barcode diagnostics. No sample should silently continue after a barcode-to-reference mismatch.
-
-### Hypermut3 and mutation calling
+Inspect the wide Hypermut3 master table and RD p-value availability:
 
 ```bash
-head -n 3 analysis-<run-date>/hypermut3/combined/master_hypermut3_RD_GD_AD_metadata.csv
-
 python - <<'PY'
 import pandas as pd
 p = 'analysis-<run-date>/hypermut3/combined/master_hypermut3_RD_GD_AD_metadata.csv'
@@ -668,14 +435,16 @@ print(df.groupby('Virus', dropna=False).size())
 PY
 ```
 
-Confirm successful completion of all expected 1-nt, 2-nt, and 3-nt array tasks before interpreting merged tables.
-
-### Stop-gain analysis
+Check read classification and BAM filtering summaries:
 
 ```bash
 column -t -s $'\t' analysis-<run-date>/stop-codon/logs/read_classification_summary.tsv | less -S
 column -t -s $'\t' analysis-<run-date>/stop-codon/logs/bam_filtering_summary.tsv | less -S
+```
 
+Verify that the collapsed stop-gain table has unique sample/read keys:
+
+```bash
 python - <<'PY'
 import pandas as pd
 p = 'analysis-<run-date>/stop-codon/hypermutated/stopgain/stopgain_sequence_level_master.collapsed_by_read.tsv'
@@ -687,79 +456,24 @@ PY
 
 ## Troubleshooting
 
-### Conda activation fails in SLURM
+| Problem | Likely cause | Resolution |
+|---|---|---|
+| `conda activate` fails in SLURM | Conda is not initialized in the batch shell. | Source `$(conda info --base)/etc/profile.d/conda.sh` before activation; load the cluster's Conda module if needed. |
+| `bam2fastq` or `pbindex` is missing | PacBio Toolkit utilities are unavailable in the active environment. | Install or update `pbtk`; verify executable availability with `command -v`. |
+| Barcode is absent from metadata | Filename-derived barcode differs from metadata because of suffixes, punctuation, whitespace, or BOM artifacts. | Compare exact strings, clean metadata, and ensure one unambiguous viral assignment per barcode. |
+| No mapped BAMs are found downstream | Mapping failed, paths are inconsistent, or BAM naming does not match expected `*.aligned.bam`. | Check mapping logs and verify all wrapper configuration blocks. |
+| `pysam.FastaFile` cannot open the reference | FASTA index is missing or unreadable. | Run `samtools faidx` and verify compatible FASTA/BED contig names. |
+| Hypermut3 or mutation arrays run out of memory | Per-read alignment reconstruction or wide count tables exceed task memory. | Reduce concurrency, profile representative samples, increase memory per task, or split sample sets. |
+| Multiple rows appear per read in stop-gain output | The read overlaps multiple CDS features or reading frames. | Use `stopgain_sequence_level_master.collapsed_by_read.tsv` for one-row-per-read summaries. |
 
-Cause: Conda has not been initialized in the noninteractive batch shell.
+## Reproducibility
 
-```bash
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate hypermut3
-```
-
-If `conda` is unavailable, load the site-specific Conda module first or use the installation's absolute path.
-
-### `bam2fastq` or `pbindex` not found
-
-Cause: PacBio Toolkit utilities are missing or a different package build was installed.
-
-```bash
-conda activate pacbio-isoseq
-conda install -y -c conda-forge -c bioconda pbtk
-command -v bam2fastq
-command -v pbindex
-```
-
-The mapping workflow can continue without `pbindex`, which is handled as optional.
-
-### Metadata barcode not found
-
-Cause: The barcode embedded in the filename does not exactly match metadata, including `F2`/`R2` suffixes, punctuation, or whitespace.
-
-Compare the filename-derived barcode against the `barcode` field, remove BOM/whitespace artifacts, and ensure each barcode has exactly one unambiguous virus assignment.
-
-### No mapped BAMs found
-
-Cause: Mapping failed, outputs were written elsewhere, or suffix conventions differ from `*.aligned.bam` expected by downstream wrappers.
-
-Confirm configured paths and file naming in `hypermut3-all-4.sh`, `mutational-calling-all-contexts-7.sh`, and `stop-codon-hypermut-nonhypermut-11.sh`.
-
-### `pysam.FastaFile` cannot open a FASTA
-
-Cause: The FASTA index is absent or the file is unreadable.
-
-```bash
-samtools faidx /path/to/reference.fasta
-```
-
-Ensure that BED contig names match the associated FASTA contig names. Correct reference/annotation mismatches at the source.
-
-### Memory exhaustion in Hypermut3 or arrays
-
-Cause: Per-read alignment reconstruction and wide count matrices can be memory intensive for deep amplicon sequencing.
-
-Reduce `MAX_CONCURRENT` or SLURM array concurrency, profile a representative sample, increase per-task memory if warranted, or split samples. Additional CPUs alone may not help Python loops unless the wrapper explicitly parallelizes them.
-
-### Multiple stop-gain rows per read
-
-This is expected for reads overlapping multiple CDS features. Use:
-
-```text
-stopgain_sequence_level_master.collapsed_by_read.tsv
-```
-
-for one row per `sample_name`/`read_id`; use the uncollapsed master table for gene- and frame-specific analyses.
-
-## Reproducibility and data use
-
-- Preserve the precise reference FASTAs, CDS BED annotations, barcode FASTA, primer FASTA, metadata CSV, and script versions used for every run.
-- Export Conda environment specifications after successful runs.
-- Retain SLURM job IDs, stdout/stderr files, manifests, mapping summaries, and diagnostic logs with the analysis directory.
-- Use a distinct dated analysis directory for each independent run.
-- Carry both `sample_name` and `read_id` through joins because read IDs are not necessarily globally unique across BAM files.
-- Calculate mapping efficiency from counts before unmapped reads are discarded.
-- Treat metadata revisions as analysis-affecting changes because they can alter reference assignment and all downstream biological interpretation.
-
-Example environment exports:
+- Retain exact versions of scripts, FASTAs, CDS BED files, barcode/primer FASTAs, and metadata used for each run.
+- Store SLURM job IDs, stdout/stderr logs, manifests, mapping summaries, and diagnostic outputs with the run directory.
+- Use a unique dated analysis directory for every independent analysis.
+- Preserve `sample_name` together with `read_id` in all joins because read IDs may recur across independent BAM files.
+- Treat metadata corrections as analysis-affecting changes: they may change viral reference assignment, mutation calls, and downstream stop-gain interpretation.
+- Export Conda environments after a successful run:
 
 ```bash
 conda env export --from-history -n pacbio-isoseq > environment-pacbio-isoseq.history.yml
@@ -772,10 +486,10 @@ conda env export -n pacbio-r > environment-r.lock.yml
 
 ## Citation and license
 
-If this workflow supports a manuscript, cite the relevant versions and methods for PacBio Lima, PacBio Toolkit utilities, minimap2, samtools, pysam, pandas, SciPy, R, and the R visualization packages. Cite the Hypermut method/software source appropriate to the version and implementation used.
+When using this workflow in a manuscript, cite the applicable versions and methods for PacBio Lima, PacBio Toolkit utilities, minimap2, samtools, pysam, pandas, SciPy, R, the R visualization packages, and the Hypermut method/software appropriate to the implementation used.
 
-No license file is currently included. Add an explicit license before redistribution or reuse, and ensure raw sequence data, donor/sample metadata, and institutional data-sharing requirements are handled under applicable approvals and policies.
+No license file is included. Add an explicit license before distribution or reuse, and ensure all raw sequence data, donor information, metadata, and data-sharing practices comply with relevant approvals and institutional policies.
 
 ## Contact
 
-Author listed in the supplied scripts: **Armando Mendez**.
+Author listed in the supplied scripts: Armando Mendez.
